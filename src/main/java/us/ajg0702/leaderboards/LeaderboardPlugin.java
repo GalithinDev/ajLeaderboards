@@ -26,6 +26,8 @@ import us.ajg0702.commands.platforms.bukkit.BukkitSender;
 import us.ajg0702.leaderboards.boards.StatEntry;
 import us.ajg0702.leaderboards.boards.TimedType;
 import us.ajg0702.leaderboards.boards.TopManager;
+import us.ajg0702.leaderboards.boards.custom.CustomKeyBoard;
+import us.ajg0702.leaderboards.boards.custom.CustomKeyBoardRegistry;
 import us.ajg0702.leaderboards.cache.Cache;
 import us.ajg0702.leaderboards.cache.ExtraManager;
 import us.ajg0702.leaderboards.commands.main.MainCommand;
@@ -68,6 +70,7 @@ public class LeaderboardPlugin extends JavaPlugin {
 
     private Config config;
     private Cache cache;
+    private CustomKeyBoardRegistry customKeyBoardRegistry = new CustomKeyBoardRegistry(Collections.emptyMap());
     private ExtraManager extraManager;
     private Messages messages;
     private TopManager topManager;
@@ -145,6 +148,8 @@ public class LeaderboardPlugin extends JavaPlugin {
         Debug.setLogger(getLogger());
         Debug.setDebug(config.getBoolean("debug"));
         Debug.setParticles(config.getBoolean("particles"));
+
+        reloadCustomKeyBoards();
 
         setWeeklyResetDay();
 
@@ -339,6 +344,14 @@ public class LeaderboardPlugin extends JavaPlugin {
 
     public Cache getCache() {
         return cache;
+    }
+
+    public CustomKeyBoardRegistry getCustomKeyBoards() {
+        return customKeyBoardRegistry;
+    }
+
+    public void reloadCustomKeyBoards() {
+        customKeyBoardRegistry = CustomKeyBoardRegistry.load(this);
     }
 
     public ExtraManager getExtraManager() {
@@ -563,8 +576,26 @@ public class LeaderboardPlugin extends JavaPlugin {
             getLogger().warning("Unable to validate placeholder because no players are online. Skipping validation.");
             return true;
         }
-        Player vp = Bukkit.getOnlinePlayers().iterator().next();
-        String out = PlaceholderAPI.setPlaceholders(vp, "%"+ Cache.alternatePlaceholders(placeholder)+"%").replaceAll(",", "");
+        CustomKeyBoard customKeyBoard = getCustomKeyBoards().get(placeholder);
+        String out;
+        if(customKeyBoard == null) {
+            Player vp = Bukkit.getOnlinePlayers().iterator().next();
+            out = PlaceholderAPI.setPlaceholders(vp, "%"+ Cache.alternatePlaceholders(placeholder)+"%").replaceAll(",", "");
+        } else {
+            Player vp = null;
+            for(Player player : Bukkit.getOnlinePlayers()) {
+                if(customKeyBoard.resolveKey(player) != null) {
+                    vp = player;
+                    break;
+                }
+            }
+            if(vp == null) {
+                getLogger().warning("Unable to validate custom-key board '" + placeholder + "' because no online players resolved " + customKeyBoard.getKeyPlaceholder() + ". Skipping validation.");
+                return true;
+            }
+            String rawOut = customKeyBoard.resolveValue(vp);
+            out = rawOut == null ? "" : rawOut.replaceAll(",", "");
+        }
         try {
             getPlaceholderFormatter().toDouble(out, placeholder);
         } catch(NumberFormatException e) {

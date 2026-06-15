@@ -27,6 +27,8 @@ repositories {
 
 dependencies {
     testImplementation("junit:junit:4.12")
+    testImplementation("com.google.code.gson:gson:2.8.9")
+    testImplementation("org.spigotmc:spigot-api:1.18.2-R0.1-SNAPSHOT")
 
     implementation("io.github.slimjar:slimjar:1.2.7")
     compileOnly("com.github.MilkBowl:VaultAPI:1.7")

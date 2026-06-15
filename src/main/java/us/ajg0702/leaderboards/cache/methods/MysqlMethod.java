@@ -193,6 +193,12 @@ public class MysqlMethod implements CacheMethod {
                     statement.executeUpdate("ALTER TABLE `"+tableName+"` COMMENT = '5';");
                     version = 5;
                 }
+                try {
+                    statement.executeUpdate("alter table `"+tableName+"` modify column `id` VARCHAR(255) NOT NULL");
+                } catch(SQLException e) {
+                    String message = e.getMessage();
+                    if(message == null || !message.contains("Data truncated")) throw e;
+                }
             }
         } catch (SQLException e) {
             e.printStackTrace();
