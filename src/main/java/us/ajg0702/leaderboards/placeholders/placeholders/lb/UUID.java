@@ -28,6 +28,6 @@ public class UUID extends Placeholder {
             return "Invalid TimedType '" + typeRaw + "'";
         }
         StatEntry r = plugin.getTopManager().getStat(Integer.parseInt(matcher.group(2)), board, type);
-        return r.getPlayerID()+"";
+        return r.getEntryId()+"";
     }
 }

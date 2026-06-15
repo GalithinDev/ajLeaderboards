@@ -35,6 +35,7 @@ public class Reload extends SubCommand {
 
         try {
             plugin.getAConfig().reload();
+            plugin.reloadCustomKeyBoards();
             plugin.setWeeklyResetDay();
 
             plugin.getMessages().reload();

@@ -12,8 +12,9 @@ import org.jetbrains.annotations.NotNull;
 import us.ajg0702.leaderboards.Debug;
 import us.ajg0702.leaderboards.LeaderboardPlugin;
 import us.ajg0702.leaderboards.boards.keys.BoardType;
+import us.ajg0702.leaderboards.boards.custom.CustomKeyBoard;
+import us.ajg0702.leaderboards.boards.keys.EntryBoardType;
 import us.ajg0702.leaderboards.boards.keys.ExtraKey;
-import us.ajg0702.leaderboards.boards.keys.PlayerBoardType;
 import us.ajg0702.leaderboards.boards.keys.PositionBoardType;
 import us.ajg0702.leaderboards.cache.BlockingFetch;
 import us.ajg0702.leaderboards.cache.CacheMethod;
@@ -155,18 +156,19 @@ public class TopManager {
             }
         }
 
-        cacheStatPosition(position, new BoardType(board, type), cached.playerID);
+        cacheStatPosition(position, new BoardType(board, type), cached.getEntryId());
 
         return cached;
     }
 
     public final Map<UUID, Map<BoardType, Integer>> positionPlayerCache = new ConcurrentHashMap<>();
+    public final Map<String, Map<BoardType, Integer>> positionEntryCache = new ConcurrentHashMap<>();
 
-    private void cacheStatPosition(int position, BoardType boardType, UUID playerUUID) {
-        if(playerUUID == null) return;
+    private void cacheStatPosition(int position, BoardType boardType, String entryId) {
+        if(entryId == null) return;
 
-        Integer oldPosition = positionPlayerCache.get(playerUUID) != null 
-            ? positionPlayerCache.get(playerUUID).get(boardType) 
+        Integer oldPosition = positionEntryCache.get(entryId) != null
+            ? positionEntryCache.get(entryId).get(boardType)
             : null;
         
         if(oldPosition != null) {
@@ -174,8 +176,8 @@ public class TopManager {
             int maxPos = Math.max(oldPosition, position);
             
             if(minPos != maxPos) {
-                positionPlayerCache.forEach((uuid, map) -> {
-                    if(!uuid.equals(playerUUID)) {
+                positionEntryCache.forEach((id, map) -> {
+                    if(!id.equals(entryId)) {
                         Integer cachedPos = map.get(boardType);
                         if(cachedPos != null && cachedPos >= minPos && cachedPos <= maxPos) {
                             map.remove(boardType);
@@ -184,44 +186,44 @@ public class TopManager {
                 });
             }
         } else {
-            positionPlayerCache.forEach((uuid, map) -> {
-                if(!uuid.equals(playerUUID)) {
+            positionEntryCache.forEach((id, map) -> {
+                if(!id.equals(entryId)) {
                     map.remove(boardType, position);
                 }
             });
         }
 
-        positionPlayerCache.compute(playerUUID, (uuid, existingMap) -> {
+        positionEntryCache.compute(entryId, (id, existingMap) -> {
             Map<BoardType, Integer> map = existingMap != null ? existingMap : new ConcurrentHashMap<>();
             map.put(boardType, position);
             return map;
         });
 
-        if(positionPlayerCache.size() > 10000) {
-            Iterator<UUID> it = positionPlayerCache.keySet().iterator();
-            while(positionPlayerCache.size() > 10000 && it.hasNext()) {
+        if(positionEntryCache.size() > 10000) {
+            Iterator<String> it = positionEntryCache.keySet().iterator();
+            while(positionEntryCache.size() > 10000 && it.hasNext()) {
                 it.next();
                 it.remove();
             }
         }
     }
 
-    Map<PlayerBoardType, Long> statEntryLastRefresh = new ConcurrentHashMap<>();
-    LoadingCache<PlayerBoardType, StatEntry> statEntryCache = CacheBuilder.newBuilder()
+    Map<EntryBoardType, Long> statEntryLastRefresh = new ConcurrentHashMap<>();
+    LoadingCache<EntryBoardType, StatEntry> statEntryCache = CacheBuilder.newBuilder()
             .expireAfterAccess(1, TimeUnit.HOURS)
             .refreshAfterWrite(5, TimeUnit.SECONDS)
             .maximumSize(10000)
             .removalListener(notification -> {
-                if(!notification.getCause().equals(RemovalCause.REPLACED)) statEntryLastRefresh.remove((PlayerBoardType) notification.getKey());
+                if(!notification.getCause().equals(RemovalCause.REPLACED)) statEntryLastRefresh.remove((EntryBoardType) notification.getKey());
             })
-            .build(new CacheLoader<PlayerBoardType, StatEntry>() {
+            .build(new CacheLoader<EntryBoardType, StatEntry>() {
                 @Override
-                public @NotNull StatEntry load(@NotNull PlayerBoardType key) {
-                    return plugin.getCache().getStatEntry(key.getPlayer(), key.getBoard(), key.getType());
+                public @NotNull StatEntry load(@NotNull EntryBoardType key) {
+                    return plugin.getCache().getStatEntry(key.getEntryId(), key.getBoard(), key.getType());
                 }
 
                 @Override
-                public @NotNull ListenableFuture<StatEntry> reload(@NotNull PlayerBoardType key, @NotNull StatEntry oldValue) {
+                public @NotNull ListenableFuture<StatEntry> reload(@NotNull EntryBoardType key, @NotNull StatEntry oldValue) {
                     long msSinceRefresh = System.currentTimeMillis() - statEntryLastRefresh.getOrDefault(key, 0L);
                     double cacheTime = Math.max(cacheTime()*1.5, plugin.getAConfig().getInt("min-player-cache-time"));
                     // The cache time is randomized a bit so that players are spread out more
@@ -230,7 +232,7 @@ public class TopManager {
                     }
                     ListenableFutureTask<StatEntry> task = ListenableFutureTask.create(() -> {
                         statEntryLastRefresh.put(key, System.currentTimeMillis());
-                        return plugin.getCache().getStatEntry(key.getPlayer(), key.getBoard(), key.getType());
+                        return plugin.getCache().getStatEntry(key.getEntryId(), key.getBoard(), key.getType());
                     });
                     if(plugin.isShuttingDown()) return Futures.immediateFuture(oldValue);
                     fetchService.execute(task);
@@ -245,7 +247,9 @@ public class TopManager {
      * @return The StatEntry representing the position on the board
      */
     public StatEntry getStatEntry(OfflinePlayer player, String board, TimedType type) {
-        PlayerBoardType key = new PlayerBoardType(player, board, type);
+        String entryId = resolveEntryId(player, board);
+        if(entryId == null) return StatEntry.noData(plugin, -1, board, type);
+        EntryBoardType key = new EntryBoardType(entryId, board, type);
 
         try {
             StatEntry cached = statEntryCache.getIfPresent(key);
@@ -254,9 +258,9 @@ public class TopManager {
                 if (BlockingFetch.shouldBlock(plugin)) {
                     cached = statEntryCache.getUnchecked(key);
                 } else {
-                    if (plugin.isShuttingDown()) return StatEntry.loading(player, key.getBoardType());
+                    if (plugin.isShuttingDown()) return loading(player, key);
                     fetchService.submit(() -> statEntryCache.getUnchecked(key));
-                    return StatEntry.loading(player, key.getBoardType());
+                    return loading(player, key);
                 }
             }
 
@@ -276,7 +280,13 @@ public class TopManager {
         return getCachedStatEntry(player, board, type, true);
     }
     public StatEntry getCachedStatEntry(OfflinePlayer player, String board, TimedType type, boolean fetchIfAbsent) {
-        PlayerBoardType key = new PlayerBoardType(player, board, type);
+        String entryId = resolveEntryId(player, board);
+        if(entryId == null) return null;
+        return getCachedStatEntry(entryId, board, type, fetchIfAbsent);
+    }
+
+    public StatEntry getCachedStatEntry(String entryId, String board, TimedType type, boolean fetchIfAbsent) {
+        EntryBoardType key = new EntryBoardType(entryId, board, type);
 
         StatEntry r;
         try {
@@ -583,7 +593,7 @@ public class TopManager {
 
     public StatEntry getRelative(OfflinePlayer player, int difference, String board, TimedType type) {
         StatEntry playerStatEntry = getCachedStatEntry(player, board, type);
-        if(playerStatEntry == null || !playerStatEntry.hasPlayer()) {
+        if(playerStatEntry == null || !playerStatEntry.hasEntry()) {
             return StatEntry.loading(plugin, board, type);
         }
         int position = playerStatEntry.getPosition() + difference;
@@ -693,6 +703,17 @@ public class TopManager {
             if(plugin.getAConfig().getBoolean("fetching-de-bug")) Debug.info("Boards: " + String.join(", ", getBoards()));
         }
         return result;
+    }
+
+    private String resolveEntryId(OfflinePlayer player, String board) {
+        CustomKeyBoard customKeyBoard = plugin.getCustomKeyBoards().get(board);
+        if(customKeyBoard == null) return player.getUniqueId().toString();
+        return customKeyBoard.resolveKey(player);
+    }
+
+    private StatEntry loading(OfflinePlayer player, EntryBoardType key) {
+        if(plugin.getCustomKeyBoards().isCustomKeyBoard(key.getBoard())) return StatEntry.loading(plugin, key.getBoardType());
+        return StatEntry.loading(player, key.getBoardType());
     }
 
     @SuppressWarnings("UnusedReturnValue")

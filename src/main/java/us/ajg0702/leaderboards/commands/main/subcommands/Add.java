@@ -53,9 +53,16 @@ public class Add extends SubCommand {
                 ));
                 return;
             }
+            plugin.reloadCustomKeyBoards();
             if(!plugin.validatePlaceholder(placeholder, sender)) {
                 String lowerPlaceholder = placeholder.toLowerCase(Locale.ROOT);
                 sender.sendMessage(message("&cThe placeholder '"+placeholder+"' does not give a numerical value. Make sure that the placeholder returns a number that is not formatted."));
+                if(!plugin.getCustomKeyBoards().isCustomKeyBoard(placeholder)) {
+                    String loaded = plugin.getCustomKeyBoards().getBoards().isEmpty()
+                            ? "none"
+                            : String.join(", ", plugin.getCustomKeyBoards().getBoards().keySet());
+                    sender.sendMessage(message("&6Custom-key debug: &7No custom-key board named &f" + placeholder + "&7 is loaded. Loaded custom-key boards: &f" + loaded + "&7. " + plugin.getCustomKeyBoards().getDebugInfo()));
+                }
                 if(lowerPlaceholder.contains("top") || lowerPlaceholder.contains("lb")) {
                     sender.sendMessage(message("&eThat placeholder looks like it might be an existing top placeholder! Please read step 1 of the setup guide!"));
                 }

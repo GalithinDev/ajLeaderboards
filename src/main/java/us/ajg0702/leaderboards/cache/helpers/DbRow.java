@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class DbRow {
 
-    private final UUID id;
+    private final String id;
     private final double value;
 
     private final Map<TimedType, Double> deltas;
@@ -28,7 +28,7 @@ public class DbRow {
     private static final Map<String, Integer> positionCache = new ConcurrentHashMap<>();
     public DbRow(ResultSet resultSet) throws SQLException {
         this(
-                UUID.fromString(resultSet.getString(getIndex(resultSet, "id"))),
+                resultSet.getString(getIndex(resultSet, "id")),
                 resultSet.getDouble(getIndex(resultSet, "value")),
                 getTypeMaps(resultSet),
                 resultSet.getString(getIndex(resultSet, "namecache")),
@@ -42,7 +42,7 @@ public class DbRow {
         positionCache.clear();
     }
 
-    private DbRow(UUID id, double value, List<Object> typeMaps, String namecache, String prefixcache, String suffixcache, String displaynamecache) {
+    private DbRow(String id, double value, List<Object> typeMaps, String namecache, String prefixcache, String suffixcache, String displaynamecache) {
         //noinspection unchecked
         this(
                 id,
@@ -58,6 +58,10 @@ public class DbRow {
     }
 
     public DbRow(UUID id, double value, Map<TimedType, Double> deltas, Map<TimedType, Double> lastTotals, Map<TimedType, Long> timestamps, String namecache, String prefixcache, String suffixcache, String displaynamecache) {
+        this(id.toString(), value, deltas, lastTotals, timestamps, namecache, prefixcache, suffixcache, displaynamecache);
+    }
+
+    public DbRow(String id, double value, Map<TimedType, Double> deltas, Map<TimedType, Double> lastTotals, Map<TimedType, Long> timestamps, String namecache, String prefixcache, String suffixcache, String displaynamecache) {
         this.id = id;
         this.value = value;
         this.deltas = deltas;
@@ -98,7 +102,7 @@ public class DbRow {
         }
     }
 
-    public UUID getId() {
+    public String getId() {
         return id;
     }
     public double getValue() {
@@ -158,7 +162,7 @@ public class DbRow {
         }
 
         return new DbRow(
-                UUID.fromString(object.get("id").getAsString()),
+                object.get("id").getAsString(),
                 object.get("value").getAsDouble(),
                 deltas, lastTotals, timestamps,
                 object.get("namecache").getAsString(),

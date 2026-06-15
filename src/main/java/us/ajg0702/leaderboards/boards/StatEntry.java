@@ -30,6 +30,7 @@ public class StatEntry {
 	String prefix;
 	String suffix;
 
+	final String entryId;
 	final UUID playerID;
 	
 	final int position;
@@ -55,6 +56,9 @@ public class StatEntry {
 	double score;
 	String scorePretty;
 	public StatEntry(int position, String board, String prefix, @Nullable String playerName, String playerDisplayName, UUID playerID, String suffix, double score, TimedType type) {
+		this(position, board, prefix, playerName, playerDisplayName, playerID == null ? null : playerID.toString(), playerID, suffix, score, type);
+	}
+	public StatEntry(int position, String board, String prefix, @Nullable String playerName, String playerDisplayName, @Nullable String entryId, @Nullable UUID playerID, String suffix, double score, TimedType type) {
 		if(prefix == null) throw new IllegalArgumentException("Prefix cannot be null");
 		if(suffix == null) throw new IllegalArgumentException("Suffix cannot be null");
 		this.playerName = playerName == null ? "" : playerName;
@@ -64,6 +68,7 @@ public class StatEntry {
 		this.suffix = suffix;
 		this.type = type;
 
+		this.entryId = entryId;
 		this.playerID = playerID;
 
 
@@ -98,7 +103,7 @@ public class StatEntry {
 		if(score == 0 && plugin.getMessages().getRawString("loading.text").equals(playerName)) {
 			return "...";
 		}
-		if(!hasPlayer()) {
+		if(!hasEntry()) {
 			if(plugin != null) {
 				Messages messages = plugin.getMessages();
 				if(score == -1) {
@@ -131,6 +136,10 @@ public class StatEntry {
 
 	public boolean hasPlayer() {
 		return getPlayerID() != null;
+	}
+
+	public boolean hasEntry() {
+		return getEntryId() != null;
 	}
 	
 	public String getPrefix() {
@@ -171,6 +180,11 @@ public class StatEntry {
 		return playerID;
 	}
 
+	@Nullable
+	public String getEntryId() {
+		return entryId;
+	}
+
 	public int getPosition() {
 		return position;
 	}
@@ -190,7 +204,7 @@ public class StatEntry {
 		if(score == 0 && BOARD_DOES_NOT_EXIST.equals(playerName)) {
 			return "BDNE";
 		}
-		if(!hasPlayer()) {
+		if(!hasEntry()) {
 			if(plugin != null) {
 				if(score == -1) {
 					return plugin.getMessages().getRawString("no-data.lb.value");
@@ -285,7 +299,7 @@ public class StatEntry {
 		if(score == 0 && BOARD_DOES_NOT_EXIST.equals(playerName)) {
 			return "BDNE";
 		}
-		if(!hasPlayer()) {
+		if(!hasEntry()) {
 			if(score == -1) {
 				return plugin.getMessages().getRawString("no-data.lb.value");
 			} else if(score == -2) {
@@ -320,7 +334,7 @@ public class StatEntry {
 		symbols.setDecimalSeparator(decimal);
 		DecimalFormat df = new DecimalFormat("#,###.##", symbols);
 		df.setGroupingUsed(useComma);
-		df.setMaximumFractionDigits(plugin.getAConfig().getInt("round-decimal-places"));
+		df.setMaximumFractionDigits(plugin == null ? 2 : plugin.getAConfig().getInt("round-decimal-places"));
 		if(board != null) {
 			for (String s : plugin.getAConfig().getStringList("show-zero-decimal")) {
 				if(s.startsWith("%") || s.endsWith("%")) {
@@ -387,6 +401,7 @@ public class StatEntry {
 				.add("playerDisplayName", playerDisplayName)
 				.add("prefix", prefix)
 				.add("suffix", suffix)
+				.add("entryId", entryId)
 				.add("playerID", nullString(playerID))
 				.add("position", position)
 				.add("board", board)
@@ -397,13 +412,16 @@ public class StatEntry {
 
 	@SuppressWarnings("unused")
 	public static StatEntry fromJsonObject(LeaderboardPlugin plugin, JsonObject object) {
+		String playerId = object.has("playerID") && !object.get("playerID").isJsonNull() ? object.get("playerID").getAsString() : null;
+		String entryId = object.has("entryId") && !object.get("entryId").isJsonNull() ? object.get("entryId").getAsString() : playerId;
 		return new StatEntry(
 				object.get("position").getAsInt(),
 				object.get("board").getAsString(),
 				object.get("prefix").getAsString(),
 				object.get("playerName").getAsString(),
 				object.get("playerDisplayName").getAsString(),
-				UUID.fromString(object.get("playerID").getAsString()),
+				entryId,
+				playerId == null ? null : UUID.fromString(playerId),
 				object.get("suffix").getAsString(),
 				object.get("score").getAsDouble(),
 				TimedType.valueOf(object.get("type").getAsString().toUpperCase(Locale.ROOT))

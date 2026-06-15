@@ -140,6 +140,12 @@ public class H2Method implements CacheMethod {
                     statement.executeUpdate("COMMENT ON TABLE \""+tableName+"\" IS '3';");
                     version = 3;
                 }
+                try {
+                    statement.executeUpdate("alter table \""+tableName+"\" alter column \"id\" varchar(255)");
+                } catch(SQLException e) {
+                    String message = e.getMessage();
+                    if(message == null || (!message.contains("42121") && !message.contains("Syntax error"))) throw e;
+                }
             }
         } catch (SQLException e) {
             e.printStackTrace();

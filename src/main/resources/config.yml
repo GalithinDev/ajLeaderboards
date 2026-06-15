@@ -96,6 +96,18 @@ update-on-leave: true
 extras:
   - "statistic_player_kills"
 
+# Custom-key boards let multiple players update one logical leaderboard row.
+# This is useful for teams, guilds, islands, clans, or any other shared entity exposed through PlaceholderAPI.
+# Create the board with /ajlb add <board-name>, then each player update will write to the key resolved here.
+# Example:
+# custom-key-boards:
+#   guild_kills:
+#     type: custom-key
+#     key-placeholder: "%guilds_id%"
+#     name-placeholder: "%guilds_name%"
+#     value-placeholder: "%guilds_total_experience%"
+custom-key-boards: {}
+
 # When resetting a timed type (e.g. daily, weekly, etc) how many positions should we save?
 # They are saved in the "past-resets" folder
 # Set to 0 or a negative number to disable saving

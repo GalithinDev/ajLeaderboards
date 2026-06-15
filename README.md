@@ -49,6 +49,35 @@ or use the [built-in signs](https://wiki.ajg0702.us/ajLeaderboards/setup/#4-opti
 For a more detailed (and explained) setup process, including the exact requirements for the placeholder you put in `/ajlb add`,
 check out the [setup guide on the wiki](https://wiki.ajg0702.us/ajleaderboards/setup/setup).
 
+### Custom-key leaderboards
+
+By default, ajLeaderboards stores one leaderboard row per player. This works well for player stats, but shared systems such as guilds, clans, islands, or teams need several players to update the same row.
+
+Custom-key boards solve that by separating the player who triggers an update from the entry that is stored on the leaderboard. Each update resolves three PlaceholderAPI placeholders:
+
+- `key-placeholder`: the stable id for the shared entry
+- `name-placeholder`: the name shown on the leaderboard
+- `value-placeholder`: the numeric value used for sorting
+
+Example for a guild leaderboard:
+
+```yaml
+custom-key-boards:
+  guild_kills:
+    type: custom-key
+    key-placeholder: "%guilds_id%"
+    name-placeholder: "%guilds_name%"
+    value-placeholder: "%guilds_total_experience%"
+```
+
+After adding that config, create the board with:
+
+```text
+/ajlb add guild_kills
+```
+
+When any guild member updates, ajLeaderboards resolves the guild id and writes to that shared row. If 20 members are in the same guild, they all update the same `guild_kills` entry instead of creating 20 duplicate player rows. Normal leaderboard display placeholders still work, and the `_uuid` leaderboard placeholder returns the custom entry id for custom-key boards.
+
 ![Support](https://ajg0702.us/img/plugins/header.php?text=Support)
 
 Before trying to get support, please [read the FAQ](https://wiki.ajg0702.us/ajLeaderboards/faq)
