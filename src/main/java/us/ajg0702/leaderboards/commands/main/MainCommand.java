@@ -27,6 +27,7 @@ public class MainCommand extends BaseCommand {
         addSubCommand(new CheckUpdate(plugin));
         addSubCommand(new UpdatePlayer(plugin));
         addSubCommand(new RemovePlayer(plugin));
+        addSubCommand(new RemoveCustomKeyEntry(plugin));
         addSubCommand(new Remove(plugin));
         addSubCommand(new ListCommand(plugin));
         addSubCommand(new Signs(plugin));
@@ -35,6 +36,7 @@ public class MainCommand extends BaseCommand {
         addSubCommand(new Viewer(plugin));
         addSubCommand(new Reset(plugin));
         addSubCommand(new UpdateAllOffline(plugin));
+        addSubCommand(new CleanupCustomKeys(plugin));
         addSubCommand(new Update(plugin));
 
         // Debug commands

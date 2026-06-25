@@ -49,7 +49,20 @@ public class Cache {
 			"h2", "create table if not exists '%s' ('id' VARCHAR(255) PRIMARY KEY, 'value' DECIMAL(65, 5)"+columnBuilder("DECIMAL(65, 5)")+", 'namecache' VARCHAR(255), 'prefixcache' VARCHAR(1024), 'suffixcache' VARCHAR(1024), 'displaynamecache' VARCHAR(2048))",
 			"mysql", "create table if not exists '%s' ('id' VARCHAR(255) PRIMARY KEY, 'value' DECIMAL(65, 5)"+columnBuilder("DECIMAL(65, 5)")+", 'namecache' VARCHAR(255), 'prefixcache' VARCHAR(1024), 'suffixcache' VARCHAR(1024), 'displaynamecache' VARCHAR(2048))"
 	);
+	private static final String CUSTOM_KEY_MEMBERS_TABLE = "custom_key_members";
+	private final Map<String, String> CREATE_CUSTOM_KEY_MEMBERS_TABLE = ImmutableMap.of(
+			"sqlite", "create table if not exists '%s' (board TEXT, player TEXT, entry_id TEXT, PRIMARY KEY(board, player))",
+			"h2", "create table if not exists '%s' ('board' VARCHAR(255), 'player' VARCHAR(36), 'entry_id' VARCHAR(255), PRIMARY KEY('board', 'player'))",
+			"mysql", "create table if not exists '%s' ('board' VARCHAR(255), 'player' VARCHAR(36), 'entry_id' VARCHAR(255), PRIMARY KEY('board', 'player'))"
+	);
 	private final String REMOVE_PLAYER = "delete from '%s' where 'namecache'=?";
+	private final String REMOVE_ENTRY = "delete from '%s' where 'id'=?";
+	private final String QUERY_CUSTOM_KEY_MEMBER = "select 'entry_id' from '%s' where 'board'=? and 'player'=?";
+	private final String UPDATE_CUSTOM_KEY_MEMBER = "update '%s' set 'entry_id'=? where 'board'=? and 'player'=?";
+	private final String INSERT_CUSTOM_KEY_MEMBER = "insert into '%s' ('board', 'player', 'entry_id') values (?, ?, ?)";
+	private final String REMOVE_CUSTOM_KEY_MEMBER = "delete from '%s' where 'board'=? and 'player'=?";
+	private final String REMOVE_CUSTOM_KEY_MEMBERS_BY_ENTRY = "delete from '%s' where 'board'=? and 'entry_id'=?";
+	private final String COUNT_CUSTOM_KEY_MEMBERS = "select COUNT(1) from '%s' where 'board'=? and 'entry_id'=?";
 	private final Map<String, String> LIST_TABLES = ImmutableMap.of(
 			"sqlite", "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
 	);
@@ -111,6 +124,7 @@ public class Cache {
 			q = "`";
 		}
 		method.init(plugin, storageConfig, this);
+		createCustomKeyMembersTable();
 	}
 
 	/**
@@ -380,6 +394,208 @@ public class Cache {
 		}
 	}
 
+	public CustomKeyCleanupResult cleanupCustomKeyBoard(String board, Collection<OfflinePlayer> players, boolean delete) {
+		CustomKeyBoard customKeyBoard = plugin.getCustomKeyBoards().get(board);
+		if(customKeyBoard == null) {
+			return CustomKeyCleanupResult.notCustomKeyBoard(board);
+		}
+
+		Set<String> currentEntryIds = new HashSet<>();
+		int scannedPlayers = 0;
+		int playersWithKeys = 0;
+
+		for(OfflinePlayer player : players) {
+			if(plugin.isShuttingDown()) break;
+			scannedPlayers++;
+			String entryId;
+			try {
+				entryId = customKeyBoard.resolveKey(player);
+			} catch(Exception e) {
+				plugin.getLogger().log(Level.WARNING, "Unable to resolve custom-key placeholder for " + player.getName() + ":", e);
+				continue;
+			}
+			if(entryId == null) {
+				removeCustomKeyMember(board, player);
+				continue;
+			}
+			playersWithKeys++;
+			currentEntryIds.add(entryId);
+			updateCustomKeyMember(board, player, entryId);
+		}
+
+		int checkedRows = 0;
+		int staleRows = 0;
+		int removedRows = 0;
+		try {
+			for(DbRow row : getRows(board)) {
+				if(plugin.isShuttingDown()) break;
+				checkedRows++;
+				if(currentEntryIds.contains(row.getId())) continue;
+				staleRows++;
+				if(delete && removeEntry(board, row.getId())) {
+					removedRows++;
+					plugin.getTopManager().invalidateEntry(row.getId(), board);
+				}
+			}
+		} catch(SQLException e) {
+			plugin.getLogger().log(Level.WARNING, "Unable to scan custom-key board " + board + " for cleanup:", e);
+			return CustomKeyCleanupResult.error(board, scannedPlayers, playersWithKeys, currentEntryIds.size(), checkedRows, staleRows, removedRows);
+		}
+
+		return CustomKeyCleanupResult.success(board, scannedPlayers, playersWithKeys, currentEntryIds.size(), checkedRows, staleRows, removedRows);
+	}
+
+	public boolean removeCustomKeyEntry(String board, String entryId) {
+		if(plugin.getCustomKeyBoards().get(board) == null) return false;
+
+		boolean removed = removeEntry(board, entryId);
+		removeCustomKeyMembersByEntry(board, entryId);
+		if(removed) {
+			plugin.getTopManager().invalidateEntry(entryId, board);
+		}
+		return removed;
+	}
+
+	private void createCustomKeyMembersTable() {
+		try (Connection conn = method.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(method.formatStatement(String.format(
+					 CREATE_CUSTOM_KEY_MEMBERS_TABLE.get(method.getName()),
+					 customKeyMembersTable()
+			 )))) {
+			ps.executeUpdate();
+		} catch(SQLException e) {
+			plugin.getLogger().log(Level.WARNING, "Unable to create custom-key membership table:", e);
+		}
+	}
+
+	private void updateCustomKeyMember(String board, OfflinePlayer player, String entryId) {
+		String playerId = player.getUniqueId().toString();
+		String previousEntryId = getCustomKeyMemberEntry(board, playerId);
+		if(entryId.equals(previousEntryId)) return;
+
+		try (Connection conn = method.getConnection();
+			 PreparedStatement update = conn.prepareStatement(String.format(
+					 method.formatStatement(UPDATE_CUSTOM_KEY_MEMBER),
+					 customKeyMembersTable()
+			 ))) {
+			update.setString(1, entryId);
+			update.setString(2, board);
+			update.setString(3, playerId);
+
+			int rowsChanged = update.executeUpdate();
+			if(rowsChanged == 0) {
+				try (PreparedStatement insert = conn.prepareStatement(String.format(
+						method.formatStatement(INSERT_CUSTOM_KEY_MEMBER),
+						customKeyMembersTable()
+				))) {
+					insert.setString(1, board);
+					insert.setString(2, playerId);
+					insert.setString(3, entryId);
+					insert.executeUpdate();
+				}
+			}
+		} catch(SQLException e) {
+			plugin.getLogger().log(Level.WARNING, "Unable to update custom-key membership for " + player.getName() + ":", e);
+			return;
+		}
+
+		deleteCustomEntryIfUnused(board, previousEntryId);
+	}
+
+	private void removeCustomKeyMember(String board, OfflinePlayer player) {
+		String playerId = player.getUniqueId().toString();
+		String previousEntryId = getCustomKeyMemberEntry(board, playerId);
+		if(previousEntryId == null) return;
+
+		try (Connection conn = method.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(String.format(
+					 method.formatStatement(REMOVE_CUSTOM_KEY_MEMBER),
+					 customKeyMembersTable()
+			 ))) {
+			ps.setString(1, board);
+			ps.setString(2, playerId);
+			ps.executeUpdate();
+		} catch(SQLException e) {
+			plugin.getLogger().log(Level.WARNING, "Unable to remove custom-key membership for " + player.getName() + ":", e);
+			return;
+		}
+
+		deleteCustomEntryIfUnused(board, previousEntryId);
+	}
+
+	private void removeCustomKeyMembersByEntry(String board, String entryId) {
+		try (Connection conn = method.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(String.format(
+					 method.formatStatement(REMOVE_CUSTOM_KEY_MEMBERS_BY_ENTRY),
+					 customKeyMembersTable()
+			 ))) {
+			ps.setString(1, board);
+			ps.setString(2, entryId);
+			ps.executeUpdate();
+		} catch(SQLException e) {
+			plugin.getLogger().log(Level.WARNING, "Unable to remove custom-key memberships for " + entryId + ":", e);
+		}
+	}
+
+	private String getCustomKeyMemberEntry(String board, String playerId) {
+		try (Connection conn = method.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(String.format(
+					 method.formatStatement(QUERY_CUSTOM_KEY_MEMBER),
+					 customKeyMembersTable()
+			 ))) {
+			ps.setString(1, board);
+			ps.setString(2, playerId);
+			try (ResultSet rs = ps.executeQuery()) {
+				if(!rs.next()) return null;
+				return rs.getString(1);
+			}
+		} catch(SQLException e) {
+			plugin.getLogger().log(Level.WARNING, "Unable to fetch custom-key membership:", e);
+			return null;
+		}
+	}
+
+	private void deleteCustomEntryIfUnused(String board, String entryId) {
+		if(entryId == null) return;
+		if(countCustomKeyMembers(board, entryId) > 0) return;
+
+		if(removeEntry(board, entryId)) {
+			plugin.getTopManager().invalidateEntry(entryId, board);
+		}
+	}
+
+	private int countCustomKeyMembers(String board, String entryId) {
+		try (Connection conn = method.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(String.format(
+					 method.formatStatement(COUNT_CUSTOM_KEY_MEMBERS),
+					 customKeyMembersTable()
+			 ))) {
+			ps.setString(1, board);
+			ps.setString(2, entryId);
+			try (ResultSet rs = ps.executeQuery()) {
+				if(!rs.next()) return 0;
+				return rs.getInt(1);
+			}
+		} catch(SQLException e) {
+			plugin.getLogger().log(Level.WARNING, "Unable to count custom-key memberships:", e);
+			return 1;
+		}
+	}
+
+	private boolean removeEntry(String board, String entryId) {
+		try (Connection conn = method.getConnection();
+			 PreparedStatement ps = conn.prepareStatement(String.format(
+					 method.formatStatement(REMOVE_ENTRY),
+					 tablePrefix+board
+		))) {
+			ps.setString(1, entryId);
+			return ps.executeUpdate() > 0;
+		} catch(SQLException e) {
+			plugin.getLogger().log(Level.WARNING, "Unable to remove custom-key entry from board:", e);
+			return false;
+		}
+	}
+
 	@SuppressWarnings("BooleanMethodIsAlwaysInverted")
 	public boolean boardExists(String board) {
 		return getBoards().contains(board);
@@ -391,7 +607,7 @@ public class Cache {
 		for(String table : getDbTableList()) {
 			if(table.indexOf(tablePrefix) != 0) continue;
 			String name = table.substring(tablePrefix.length());
-			if(name.equals("extras")) continue;
+			if(isMetadataTable(name)) continue;
 			o.add(name);
 		}
 
@@ -413,13 +629,21 @@ public class Cache {
 				String e = r.getString(1);
 				if(e.indexOf(tablePrefix) != 0) continue;
 				String name = e.substring(tablePrefix.length());
-				if(name.equals("extras")) continue;
+				if(isMetadataTable(name)) continue;
 				b.add(e);
 			}
 		} catch(SQLException e) {
 			plugin.getLogger().log(Level.WARNING, "Unable to get list of tables:", e);
 		}
 		return b;
+	}
+
+	private boolean isMetadataTable(String name) {
+		return name.equals("extras") || name.equals(CUSTOM_KEY_MEMBERS_TABLE);
+	}
+
+	private String customKeyMembersTable() {
+		return tablePrefix + CUSTOM_KEY_MEMBERS_TABLE;
 	}
 
 	public boolean removeBoard(String board) {
@@ -556,6 +780,12 @@ public class Cache {
 				entryId = customKeyBoard.resolveKey(player);
 				if(entryId == null) {
 					if(debug) Debug.info("Skipping custom-key board " + board + " for " + player.getName() + " because the key placeholder was empty");
+					Runnable cleanupTask = () -> removeCustomKeyMember(board, player);
+					if(Bukkit.isPrimaryThread()) {
+						plugin.getTopManager().submit(cleanupTask);
+					} else {
+						cleanupTask.run();
+					}
 					return;
 				}
 				outputraw = customKeyBoard.resolveValue(player);
@@ -601,6 +831,10 @@ public class Cache {
 					Debug.info("Update for " + player.getName() + " on " + board + " was canceled by an event!");
 					return;
 				}
+			}
+
+			if(customEntry) {
+				updateCustomKeyMember(board, player, finalEntryId);
 			}
 
 			StatEntry cached = plugin.getTopManager().getCachedStatEntry(finalEntryId, board, TimedType.ALLTIME, plugin.getAConfig().getBoolean("check-cache-on-update"));
@@ -1047,5 +1281,87 @@ public class Cache {
 
 	public List<String> getNonExistantBoards() {
 		return nonExistantBoards;
+	}
+
+	public static class CustomKeyCleanupResult {
+		private final String board;
+		private final boolean customKeyBoard;
+		private final boolean error;
+		private final int scannedPlayers;
+		private final int playersWithKeys;
+		private final int currentEntries;
+		private final int checkedRows;
+		private final int staleRows;
+		private final int removedRows;
+
+		private CustomKeyCleanupResult(
+				String board,
+				boolean customKeyBoard,
+				boolean error,
+				int scannedPlayers,
+				int playersWithKeys,
+				int currentEntries,
+				int checkedRows,
+				int staleRows,
+				int removedRows
+		) {
+			this.board = board;
+			this.customKeyBoard = customKeyBoard;
+			this.error = error;
+			this.scannedPlayers = scannedPlayers;
+			this.playersWithKeys = playersWithKeys;
+			this.currentEntries = currentEntries;
+			this.checkedRows = checkedRows;
+			this.staleRows = staleRows;
+			this.removedRows = removedRows;
+		}
+
+		public static CustomKeyCleanupResult notCustomKeyBoard(String board) {
+			return new CustomKeyCleanupResult(board, false, false, 0, 0, 0, 0, 0, 0);
+		}
+
+		public static CustomKeyCleanupResult error(String board, int scannedPlayers, int playersWithKeys, int currentEntries, int checkedRows, int staleRows, int removedRows) {
+			return new CustomKeyCleanupResult(board, true, true, scannedPlayers, playersWithKeys, currentEntries, checkedRows, staleRows, removedRows);
+		}
+
+		public static CustomKeyCleanupResult success(String board, int scannedPlayers, int playersWithKeys, int currentEntries, int checkedRows, int staleRows, int removedRows) {
+			return new CustomKeyCleanupResult(board, true, false, scannedPlayers, playersWithKeys, currentEntries, checkedRows, staleRows, removedRows);
+		}
+
+		public String getBoard() {
+			return board;
+		}
+
+		public boolean isCustomKeyBoard() {
+			return customKeyBoard;
+		}
+
+		public boolean isError() {
+			return error;
+		}
+
+		public int getScannedPlayers() {
+			return scannedPlayers;
+		}
+
+		public int getPlayersWithKeys() {
+			return playersWithKeys;
+		}
+
+		public int getCurrentEntries() {
+			return currentEntries;
+		}
+
+		public int getCheckedRows() {
+			return checkedRows;
+		}
+
+		public int getStaleRows() {
+			return staleRows;
+		}
+
+		public int getRemovedRows() {
+			return removedRows;
+		}
 	}
 }

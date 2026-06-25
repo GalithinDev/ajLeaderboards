@@ -330,6 +330,16 @@ public class TopManager {
         return r;
     }
 
+    public void invalidateEntry(String entryId, String board) {
+        for(TimedType type : TimedType.values()) {
+            statEntryCache.invalidate(new EntryBoardType(entryId, board, type));
+            totalCache.invalidate(new BoardType(board, type));
+        }
+        positionEntryCache.remove(entryId);
+        positionCache.invalidateAll();
+        boardSizeCache.invalidate(board);
+    }
+
 
     Map<String, Long> boardSizeLastRefresh = new ConcurrentHashMap<>();
     LoadingCache<String, Integer> boardSizeCache = CacheBuilder.newBuilder()
@@ -731,4 +741,3 @@ public class TopManager {
                 "feel free to ask in aj's discord server (invite link is on the ajLeaderboards plugin page under 'support')");
     }
 }
-

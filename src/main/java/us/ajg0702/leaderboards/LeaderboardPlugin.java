@@ -346,6 +346,25 @@ public class LeaderboardPlugin extends JavaPlugin {
         return cache;
     }
 
+    public CompletableFuture<Integer> removeCustomKeyEntryFromCustomKeyBoards(String entryId) {
+        CompletableFuture<Integer> future = new CompletableFuture<>();
+        getScheduler().runTaskAsynchronously(() -> {
+            try {
+                int removed = 0;
+                for(String board : getCustomKeyBoards().getBoards().keySet()) {
+                    if(!getCache().boardExists(board)) continue;
+                    if(getCache().removeCustomKeyEntry(board, entryId)) {
+                        removed++;
+                    }
+                }
+                future.complete(removed);
+            } catch(Throwable throwable) {
+                future.completeExceptionally(throwable);
+            }
+        });
+        return future;
+    }
+
     public CustomKeyBoardRegistry getCustomKeyBoards() {
         return customKeyBoardRegistry;
     }
